@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
 	"net"
 	"net/http"
@@ -11,7 +12,17 @@ import (
 	"strings"
 )
 
+const version = "1.0.0"
+
 func main() {
+	ver := flag.Bool("version", false, "Prints version")
+	flag.Parse()
+
+	if *ver {
+		fmt.Println(version)
+		return
+	}
+
 	http.HandleFunc("/", getIPAdress)
 	http.ListenAndServe(":8091", nil)
 }
