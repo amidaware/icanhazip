@@ -9,10 +9,11 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"runtime/debug"
 	"strings"
 )
 
-const version = "1.0.0"
+const version = "1.1.0"
 
 func main() {
 	ver := flag.Bool("version", false, "Prints version")
@@ -20,6 +21,10 @@ func main() {
 
 	if *ver {
 		fmt.Println(version)
+		bi, ok := debug.ReadBuildInfo()
+		if ok {
+			fmt.Println(bi.String())
+		}
 		return
 	}
 
