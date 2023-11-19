@@ -8,12 +8,11 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"regexp"
 	"runtime/debug"
 	"strings"
 )
 
-const version = "1.1.0"
+const version = "1.2.0"
 
 func main() {
 	ver := flag.Bool("version", false, "Prints version")
@@ -21,20 +20,19 @@ func main() {
 
 	if *ver {
 		fmt.Println(version)
-		bi, ok := debug.ReadBuildInfo()
-		if ok {
+		if bi, ok := debug.ReadBuildInfo(); ok {
 			fmt.Println(bi.String())
+			return
 		}
-		return
 	}
 
-	http.HandleFunc("/", getIPAdress)
+	http.HandleFunc("/", getIPAddress)
 	http.ListenAndServe(":8091", nil)
 }
 
 // https://husobee.github.io/golang/ip-address/2015/12/17/remote-ip-go.html
 
-//ipRange - a structure that holds the start and end of a range of ip addresses
+// ipRange - a structure that holds the start and end of a range of ip addresses
 type ipRange struct {
 	start net.IP
 	end   net.IP
@@ -50,27 +48,27 @@ func inRange(r ipRange, ipAddress net.IP) bool {
 }
 
 var privateRanges = []ipRange{
-	ipRange{
+	{
 		start: net.ParseIP("10.0.0.0"),
 		end:   net.ParseIP("10.255.255.255"),
 	},
-	ipRange{
+	{
 		start: net.ParseIP("100.64.0.0"),
 		end:   net.ParseIP("100.127.255.255"),
 	},
-	ipRange{
+	{
 		start: net.ParseIP("172.16.0.0"),
 		end:   net.ParseIP("172.31.255.255"),
 	},
-	ipRange{
+	{
 		start: net.ParseIP("192.0.0.0"),
 		end:   net.ParseIP("192.0.0.255"),
 	},
-	ipRange{
+	{
 		start: net.ParseIP("192.168.0.0"),
 		end:   net.ParseIP("192.168.255.255"),
 	},
-	ipRange{
+	{
 		start: net.ParseIP("198.18.0.0"),
 		end:   net.ParseIP("198.19.255.255"),
 	},
@@ -91,32 +89,42 @@ func isPrivateSubnet(ipAddress net.IP) bool {
 	return false
 }
 
-func getIPAdress(w http.ResponseWriter, r *http.Request) {
-	// will match either ipv4 , or ipv4:port
-	var ipPort = regexp.MustCompile(`[0-9]+(?:\.[0-9]+){3}(:[0-9]+)?`)
-
-	ret := r.RemoteAddr
+func getIPAddress(w http.ResponseWriter, r *http.Request) {
+	var ipv4 string
+	var ipv6 string
 
 	for _, h := range []string{"X-Forwarded-For", "X-Real-Ip"} {
 		addresses := strings.Split(r.Header.Get(h), ",")
-		// march from right to left until we get a public address
-		// that will be the address right before our proxy.
 		for i := len(addresses) - 1; i >= 0; i-- {
-			ip := strings.TrimSpace(addresses[i])
-			// header can contain spaces too, strip those out.
+			ip, _, err := net.SplitHostPort(strings.TrimSpace(addresses[i]))
+			if err != nil {
+				ip = strings.TrimSpace(addresses[i]) // In case there's no port
+			}
 			realIP := net.ParseIP(ip)
-			if !realIP.IsGlobalUnicast() || isPrivateSubnet(realIP) {
-				// bad address, go to next
+			if realIP == nil {
 				continue
 			}
-			ret = ip
-			break
+			if ipv4Address := realIP.To4(); ipv4Address != nil {
+				if !realIP.IsGlobalUnicast() || isPrivateSubnet(realIP) {
+					continue
+				}
+				ipv4 = ip
+				break // Found a valid IPv4 address
+			} else if ipv6 == "" && realIP.IsGlobalUnicast() && !isPrivateSubnet(realIP) {
+				ipv6 = ip // Store first valid IPv6 address
+			}
+		}
+		if ipv4 != "" {
+			fmt.Fprintf(w, ipv4+"\n")
+			return
 		}
 	}
 
-	if ipPort.MatchString(ret) && strings.Contains(ret, ":") {
-		ret = strings.Split(ret, ":")[0]
+	if ipv6 != "" { // Use IPv6 if no IPv4 was found
+		fmt.Fprintf(w, ipv6+"\n")
+	} else {
+		ret := r.RemoteAddr
+		ip, _, _ := net.SplitHostPort(ret)
+		fmt.Fprintf(w, ip+"\n")
 	}
-
-	fmt.Fprintf(w, ret+"\n")
 }
